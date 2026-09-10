@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Мои привычки{% endblock %}
+
+{% block content %}
+<h1>Мои привычки</h1>
+
+{% if pending %}
+  <p class="reminder">Сегодня ещё не отмечено: <strong>{{ pending | join(", ") }}</strong></p>
+{% elif stats %}
+  <p class="reminder done">Все привычки на сегодня закрыты 🎉</p>
+{% endif %}
+
+<form class="new-habit" method="post" action="/habits">
+  <input type="text" name="name" maxlength="100" placeholder="Например: 30 минут чтения" required>
+  <input type="color" name="color" value="#4ade80" title="Цвет квадратиков">
+  <button type="submit">Добавить</button>
+</form>
+
+{% if not stats %}
+  <p class="empty">Пока пусто. Добавь первую привычку — и начнём считать серию.</p>
+{% endif %}
+
+<ul class="habits">
+  {% for s in stats %}
+  <li class="habit-card" data-id="{{ s.habit.id }}" style="--habit-color: {{ s.habit.color }}">
+    <button class="check {% if s.done_today %}checked{% endif %}"
+            type="button"
+            data-id="{{ s.habit.id }}"
+            title="Отметить за сегодня">✓</button>
+
+    <div class="habit-info">
+      <a class="habit-name" href="/habits/{{ s.habit.id }}">{{ s.habit.name }}</a>
+      <div class="habit-meta">
+        <span class="streak">🔥 <span data-streak="{{ s.habit.id }}">{{ s.current_streak }}</span> дн.</span>
+        <span>рекорд: {{ s.longest_streak }}</span>
+        <span>всего: {{ s.total }}</span>
+      </div>
+    </div>
+
+    <button class="ghost danger" type="button" data-delete="{{ s.habit.id }}" title="Удалить">✕</button>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll(".check").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const id = btn.dataset.id;
+      const res = await fetch(`/habits/${id}/toggle`, { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      btn.classList.toggle("checked", data.done);
+      document.querySelector(`[data-streak="${id}"]`).textContent = data.current_streak;
+    });
+  });
+
+  document.querySelectorAll("[data-delete]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const id = btn.dataset.delete;
+      if (!confirm("Удалить привычку вместе со всей историей?")) return;
+      const res = await fetch(`/habits/${id}`, { method: "DELETE" });
+      if (res.ok) btn.closest(".habit-card").remove();
+    });
+  });
+</script>
+{% endblock %}

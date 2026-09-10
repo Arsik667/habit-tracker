@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ habit.name }}{% endblock %}
+
+{% block content %}
+<p class="back"><a href="/">← ко всем привычкам</a></p>
+
+<div class="habit-header" style="--habit-color: {{ habit.color }}">
+  <h1>{{ habit.name }}</h1>
+  <button class="primary {% if stats.done_today %}checked{% endif %}" id="toggle-today" type="button">
+    {% if stats.done_today %}Отмечено сегодня ✓{% else %}Отметить сегодня{% endif %}
+  </button>
+</div>
+
+<div class="stats">
+  <div class="stat"><span class="value" id="stat-streak">{{ stats.current_streak }}</span><span class="label">текущая серия</span></div>
+  <div class="stat"><span class="value" id="stat-longest">{{ stats.longest_streak }}</span><span class="label">рекорд</span></div>
+  <div class="stat"><span class="value" id="stat-total">{{ stats.total }}</span><span class="label">всего дней</span></div>
+</div>
+
+<section class="grid-block" style="--habit-color: {{ habit.color }}">
+  <div class="months" id="months"></div>
+  <div class="grid-row">
+    <div class="weekdays"><span>Пн</span><span>Ср</span><span>Пт</span></div>
+    <div class="grid" id="grid" role="grid" aria-label="Сетка отметок за год"></div>
+  </div>
+  <p class="hint">Клик по квадратику ставит или снимает отметку за этот день.</p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const HABIT_ID = {{ habit.id }};
+  const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  const gridEl = document.getElementById("grid");
+  const monthsEl = document.getElementById("months");
+  const toggleBtn = document.getElementById("toggle-today");
+
+  // Собираем YYYY-MM-DD из локальных компонент: toISOString() увёл бы дату
+  // в UTC и сдвинул сетку на день в поясах восточнее Гринвича.
+  const iso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parse = (s) => new Date(s + "T00:00:00");
+
+  let done = new Set();
+  // «Сегодня» берём с сервера — он же считает серии.
+  const today = "{{ today.isoformat() }}";
+
+  async function load() {
+    const res = await fetch(`/habits/${HABIT_ID}/data`);
+    const data = await res.json();
+    done = new Set(data.dates);
+    render(parse(data.start), parse(data.end));
+    setStats(data.current_streak, data.longest_streak, data.total);
+  }
+
+  function setStats(streak, longest, total) {
+    document.getElementById("stat-streak").textContent = streak;
+    document.getElementById("stat-longest").textContent = longest;
+    document.getElementById("stat-total").textContent = total;
+  }
+
+  function render(start, end) {
+    gridEl.innerHTML = "";
+    monthsEl.innerHTML = "";
+
+    let lastMonth = -1;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = iso(d);
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "cell" + (done.has(key) ? " on" : "");
+      cell.dataset.date = key;
+      cell.title = `${key}${done.has(key) ? " — отмечено" : ""}`;
+      cell.addEventListener("click", () => toggle(key, cell));
+      gridEl.appendChild(cell);
+
+      // Подпись месяца — над первым понедельником нового месяца.
+      if (d.getDay() === 1) {
+        const label = document.createElement("span");
+        label.textContent = d.getMonth() !== lastMonth ? MONTHS[d.getMonth()] : "";
+        lastMonth = d.getMonth();
+        monthsEl.appendChild(label);
+      }
+    }
+  }
+
+  async function toggle(dateStr, cell) {
+    const res = await fetch(`/habits/${HABIT_ID}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: dateStr }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.done) done.add(dateStr); else done.delete(dateStr);
+    if (cell) cell.classList.toggle("on", data.done);
+    if (dateStr === today) syncTodayButton(data.done);
+
+    // Рекорд и общее число проще перечитать с сервера.
+    const fresh = await (await fetch(`/habits/${HABIT_ID}/data`)).json();
+    setStats(fresh.current_streak, fresh.longest_streak, fresh.total);
+  }
+
+  function syncTodayButton(isDone) {
+    toggleBtn.classList.toggle("checked", isDone);
+    toggleBtn.textContent = isDone ? "Отмечено сегодня ✓" : "Отметить сегодня";
+  }
+
+  toggleBtn.addEventListener("click", () => {
+    const cell = gridEl.querySelector(`[data-date="${today}"]`);
+    toggle(today, cell);
+  });
+
+  load();
+</script>
+{% endblock %}
